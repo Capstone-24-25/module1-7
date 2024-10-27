@@ -1,0 +1,185 @@
+## Preprocessing 
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/caseylinden/Documents/PSTAT197A/GitHub/module1-7")
+```
+
+```{r}
+getwd()
+
+library(tidyverse)
+# get names
+var_names <- read_csv('data/biomarker-raw.csv', 
+                     col_names = F, 
+                     n_max = 2, 
+                     col_select = -(1:2)) %>%
+  t() %>%
+  as_tibble() %>%
+  rename(name = V1, 
+         abbreviation = V2) %>%
+  na.omit()
+
+# function for trimming outliers (good idea??)
+trim <- function(x, .at){
+  x[abs(x) > .at] <- sign(x[abs(x) > .at])*.at
+  return(x)
+}
+
+# read in data
+biomarker_clean <- read_csv('data/biomarker-raw.csv', 
+         skip = 2,
+         col_select = -2L,
+         col_names = c('group', 
+                       'empty',
+                       pull(var_names, abbreviation),
+                       'ados'),
+         na = c('-', '')) %>%
+  filter(!is.na(group)) %>%
+  # log transform, center and scale, and trim
+  mutate(across(.cols = -c(group, ados), 
+                ~ trim(scale(log10(.x))[, 1], .at = 3))) %>%
+  # reorder columns
+  select(group, ados, everything())
+
+# export as r binary
+save(list = 'biomarker_clean', 
+     file = 'data/biomarker-clean.RData')
+```
+```{r}
+# Load data without log-transoform
+biomarker_raw <- read_csv('data/biomarker-raw.csv', 
+         skip = 2,
+         col_select = -2L,
+         col_names = c('group', 
+                       'empty',
+                       pull(var_names, abbreviation),
+                       'ados'),
+         na = c('-', '')) %>%
+  filter(!is.na(group)) %>%
+  # reorder columns
+  select(group, ados, everything())
+
+biomarker_clean %>% head(5)
+biomarker_raw %>% head(5)
+```
+# Problem 1
+Log-transforming protein values in a data set is done to address the distribution of the raw values. The data follows a right-skewed (positively skewed) distribution, meaning there are many small values and a few very large values. This skew can make it difficult to analyze patterns and correlations, as the larger values can overly influence results.
+
+When you apply a log transformation, it compresses these larger values and spreads out the smaller values, making the distribution more symmetrical and often closer to normal. This transformation helps stabilize variances, reduce the impact of outliers, and makes the data more suitable for linear models or other analyses that assume a normal distribution.
+
+## Problem 3
+
+```{r}
+library(tidyverse)
+library(infer)
+library(randomForest)
+library(tidymodels)
+library(modelr)
+library(yardstick)
+load('data/biomarker-clean.RData')
+
+# partition data
+biomarker_split <- biomarker_clean %>%
+  initial_split(prop = 0.8)
+
+biomarker_train <- training(biomarker_split)
+biomarket_test <- testing(biomarker_split)
+
+## MULTIPLE TESTING
+####################
+
+
+# function to compute tests
+test_fn <- function(.df){
+  t_test(.df, 
+         formula = level ~ group,
+         order = c('ASD', 'TD'),
+         alternative = 'two-sided',
+         var.equal = F)
+}
+
+ttests_out <- biomarker_train %>%
+  # drop ADOS score
+  select(-ados) %>%
+  # arrange in long format
+  pivot_longer(-group, 
+               names_to = 'protein', 
+               values_to = 'level') %>%
+  # nest by protein
+  nest(data = c(level, group)) %>% 
+  # compute t tests
+  mutate(ttest = map(data, test_fn)) %>%
+  unnest(ttest) %>%
+  # sort by p-value
+  arrange(p_value) %>%
+  # multiple testing correction
+  mutate(m = n(),
+         hm = log(m) + 1/(2*m) - digamma(1),
+         rank = row_number(),
+         p.adj = m*hm*p_value/rank)
+
+# select significant proteins
+proteins_s1 <- ttests_out %>%
+  slice_min(p.adj, n = 20) %>%
+  pull(protein)
+
+## RANDOM FOREST
+##################
+
+# store predictors and response separately
+predictors <- biomarker_train %>%
+  select(-c(group, ados))
+
+response <- biomarker_train %>% pull(group) %>% factor()
+
+# fit RF
+set.seed(101422)
+rf_out <- randomForest(x = predictors, 
+                       y = response, 
+                       ntree = 1000, 
+                       importance = T)
+
+# check errors
+rf_out$confusion
+
+# compute importance scores
+proteins_s2 <- rf_out$importance %>% 
+  as_tibble() %>%
+  mutate(protein = rownames(rf_out$importance)) %>%
+  slice_max(MeanDecreaseGini, n = 20) %>%
+  pull(protein)
+
+## LOGISTIC REGRESSION
+#######################
+
+# select subset of interest
+proteins_sstar <- union(proteins_s1, proteins_s2) 
+
+biomarker_sstar <- biomarker_clean %>%
+  select(group, any_of(proteins_sstar)) %>%
+  mutate(class = (group == 'ASD')) %>%
+  select(-group)
+
+# partition into training and test set
+set.seed(101422)
+biomarker_split <- biomarker_sstar %>%
+  initial_split(prop = 0.8)
+
+# fit logistic regression model to training set
+fit <- glm(class ~ ., 
+           data = training(biomarker_split), 
+           family = 'binomial')
+
+# evaluate errors on test set
+class_metrics <- metric_set(sensitivity, 
+                            specificity, 
+                            accuracy,
+                            roc_auc)
+
+testing(biomarker_split) %>%
+  add_predictions(fit, type = 'response') %>%
+  mutate(est = as.factor(pred > 0.5), tr_c = as.factor(class)) %>%
+  class_metrics(estimate = est,
+              truth = tr_c, pred,
+              event_level = 'second')
+```
+Sensitivity, specificity, accuracy, and roc_auc all increased when we included these changes. Adding the train-test split at the beginning avoids information leakage and resulted in a more honest evaluation of model performance. When evaluated on truly unseen data, the model's performance metrics are more trustworthy, often yielding better performance because there is less overfitting. We changed the selection number to 20 from 10 which led to a slightly more accurate model. This is because increasing the number of proteins used as predictors brings in possibly valuable information, allowing it to capture a broader set of relationships between proteins and outcomes. When we do a fuzzy intersection this allows for a more flexible selection of predictive proteins, improving the model's generalization. This allows for the model to include proteins that are not the absolute top in each method but still carry meaningful predictive information. This mitigates the risk of dropping useful proteins due to strict intersection requirements.    
