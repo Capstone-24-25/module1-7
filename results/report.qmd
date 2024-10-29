@@ -1,7 +1,7 @@
 ---
 title: "Biomarkers of ASD"
-subtitle: "If you want a subtitle put it here"
-author: "List names here"
+subtitle: "Group 7"
+author: "Amy Ji, Bennett Bishop, Casey Linden, Hannah Kim"
 date: last-modified
 published-title: "Updated"
 editor: visual
