@@ -1,0 +1,28 @@
+---
+title: "module 1"
+author: "Hannah Kim"
+date: "2024-10-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = F}
+# Load in libraries
+library(tidyverse)
+library(tidymodels)
+library(modelr)
+library(rsample)
+library(yardstick)
+
+# Load in data
+load('../data/biomarker-clean.RData')
+```
+
+## Question 4 Outline
+```{r}
+# Potential methods: random forest, logistic regression, multiple testing
+```
+
