@@ -194,9 +194,9 @@ testing(biomarker_split) %>%
               event_level = 'second')
 
 ```
-```
+The sensitivity, specificity, accuracy, and ROC AUC all increased after implementing these changes, indicating a stronger model performance. By performing an initial train-test split, we minimized information leakage, which provided a more realistic evaluation of the model on truly unseen data. This approach contributes to more reliable and trustworthy performance metrics, often improving generalization and reducing overfitting.
 
-
+Increasing the selection threshold from 10 to 20 proteins enhanced model accuracy by incorporating a broader range of predictive features, allowing the model to capture more complex relationships between protein levels and outcomes. Additionally, the use of a fuzzy intersection in selecting predictive proteins provided greater flexibility, enabling the model to retain proteins that might not be top-ranked in both methods but still hold significant predictive value. This approach reduces the risk of discarding useful proteins due to rigid selection criteria, ultimately contributing to better generalization and robustness in the model’s performance
 
 
 
