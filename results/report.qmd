@@ -35,15 +35,17 @@ Summarize the methodology of the paper in 1-3 paragraphs. You need not explain t
 
 ## Findings
 
-#### Log Transformation
+
+### Impact of preprocessing and outliers
+
+#### Question 1
 
 The purpose of Log-transforming protein values in a data set is done to address the distribution of the raw values. The data follows a right-skewed (positively skewed) distribution, meaning there are many small values and a few very large values. This skew can make it difficult to analyze patterns and correlations, as the larger values can overly influence results.
 
 When we apply a log transformation, we would reduce the impact of the extreme high values, therefore making the distribution more symmetric and closer to a normal distribution. This action would bring outliers closer to the main body data, which would stabilize variance and improve the performance of models. Additionally, it could make the relationships between the variables more linear, which would ensure that in analyses the results will not be overly influenced by extreme values.
 
-### Impact of preprocessing and outliers
+#### Question 2
 
-Tasks 1-2
 
 ### Methodlogical variations
 
