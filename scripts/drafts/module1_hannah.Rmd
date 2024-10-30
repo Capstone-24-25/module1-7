@@ -7,6 +7,7 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir="C:/Users/hanna/OneDrive/Documents/pstat197/GitHub/module1-7")
 ```
 
 ```{r, message = F}
@@ -16,13 +17,36 @@ library(tidymodels)
 library(modelr)
 library(rsample)
 library(yardstick)
+library(randomForest)
+library(infer)
+library(glmnet)
+library(ggplot2)
 
-# Load in data
-load('../data/biomarker-clean.RData')
+load("data\\biomarker-clean.RData")
 ```
 
-## Question 4 Outline
+## -- Logistic Regression
 ```{r}
-# Potential methods: random forest, logistic regression, multiple testing
+biomarker <- biomarker_clean %>%
+  select(-ados) %>%
+  mutate(class = as.numeric(group == 'ASD'))
+
+# Splitting the data
+set.seed(102022)
+
+partitions <- biomarker %>%
+  initial_split(prop = 0.8)
+
 ```
+
+## -- LASSO Regression
+```{r}
+
+```
+
+## -- Random Forest
+```{r}
+
+```
+
 
