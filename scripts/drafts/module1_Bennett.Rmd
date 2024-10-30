@@ -1,0 +1,82 @@
+Bennett Bishop work for Question 2:
+
+2.  Temporarily remove the outlier trimming from preprocessing and do some exploratory analysis of outlying values. Are there specific *subjects* (not values) that seem to be outliers? If so, are outliers more frequent in one group or the other? (Hint: consider tabluating the number of outlying values per subject.)
+
+``` {r}
+## Preprocessing function but without trimming:
+
+# get names
+var_names <- read_csv('../../data/biomarker-raw.csv', 
+                     col_names = F, 
+                     n_max = 2, 
+                     col_select = -(1:2)) %>%
+  t() %>%
+  as_tibble() %>%
+  rename(name = V1, 
+         abbreviation = V2) %>%
+  na.omit()
+
+# function for trimming outliers (good idea??)
+# trim <- function(x, .at){
+# x[abs(x) > .at] <- sign(x[abs(x) > .at])*.at
+#  return(x)
+#}
+
+# read in data
+biomarker_clean <- read_csv('../../data/biomarker-raw.csv', 
+         skip = 2,
+         col_select = -2L,
+         col_names = c('group', 
+                       'empty',
+                       pull(var_names, abbreviation),
+                       'ados'),
+         na = c('-', '')) %>%
+  filter(!is.na(group)) %>%
+  # log transform, center and scale, and trim
+  mutate(across(.cols = -c(group, ados),
+                ~ (scale(log10(.x))[, 1]))) %>%
+  # reorder columns
+  select(group, ados, everything())
+
+# calculate Z-scores for each column
+z_score <- biomarker_clean %>%
+  group_by(group) %>%
+  mutate(across(where(is.numeric), ~ ((. - mean(., na.rm = TRUE)) / sd(., na.rm = TRUE)))) %>%
+  ungroup()
+
+# count outliers using `if_else()` and summarise per group
+outlier_counts <- z_score %>%
+  mutate(across(where(is.numeric), ~ if_else(abs(.) > 3, 1, 0))) %>%
+  group_by(group) %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE))
+
+# Display the outlier counts by group and variable
+print(outlier_counts)
+```
+
+From simply looking over each subject above, it looks like most have 0-3 outliers. Lets see the total number of outliers in each group:
+
+```{r}
+total_outliers_by_group <- outlier_counts %>%
+  rowwise() %>%
+  mutate(Total_Outliers = sum(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  select(group, Total_Outliers)
+
+total_outliers_by_group
+```
+It looks like ASD has 1062 total outliers, while TD has a total of 1341 outliers. 
+
+Now, we can check out the subjects with large numbers of outliers. The following graph shows subjects with 4+ outliers.
+
+```{r}
+# Identify subjects with 4 or more outliers
+outliers_ge_4 <- outlier_counts %>%
+  pivot_longer(cols = -group, names_to = "Column", values_to = "Outlier_Count") %>%
+  filter(Outlier_Count >= 4) %>%
+  arrange(group, desc(Outlier_Count))
+
+# Display the result
+outliers_ge_4
+```
+
+We can see that 4 groups above, groups: Sig14, TLR2, TGM3 and GM-CSF all have 4-5 outliers. Neat!
