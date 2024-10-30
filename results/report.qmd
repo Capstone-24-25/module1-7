@@ -48,7 +48,10 @@ When we apply a log transformation, we would reduce the impact of the extreme hi
 ### Methodlogical variations
 
 #### Question 3 
-Our code splits the data into training and test sets at the beginning with biomarker_split, and the feature selection is performed on biomarker_train. This setup ensures that the test set (biomarker_test) remains untouched until the final evaluation, so this requirement is already met in the code.
+Our code splits the data into training and test sets at the beginning with biomarker_split, and the feature selection is performed on biomarker_train. This setup ensures that the test set (biomarker_test) remains untouched until the final evaluation, so this requirement is already met in the code. 
+By performing feature selection only on the training set, we avoid information leakage into the test set, leading to a more unbiased estimate of the model's performance. This approach ensures that the test set is purely "unseen" data, providing a more reliable measure of how the model will perform in real-world scenarios. 
+Secondly, We increased the number of selected proteins which allows for a broader range of potentially relevant features, which might capture more nuanced relationships between proteins and the outcome (ASD vs. TD). However, selecting more proteins may also introduce some noise if the added proteins are less predictive.
+Thirdly, we used Weighted Combination of Ranks as the fuzzy intersection method, combining ranks from the t-tests and random forest based on significance and importance scores. The fuzzy intersection generally improves model generalization and robustness. By allowing flexibility, the model can retain proteins that may contribute meaningfully to predictions even if they’re not strictly top-ranked in both methods. This can enhance accuracy and ROC AUC without sacrificing sensitivity, as meaningful proteins from each selection method are retaineds.
 
 ### Improved classifier
 
