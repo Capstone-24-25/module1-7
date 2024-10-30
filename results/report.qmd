@@ -27,14 +27,13 @@ Do at the end
 
 ## Dataset
 
-Amy
+
 
 ## Summary of published analysis
 
 Summarize the methodology of the paper in 1-3 paragraphs. You need not explain the methods in depth as we did in class; just indicate what methods were used and how they were combined. If possible, include a diagram that depicts the methodological design. (Quarto has support for [GraphViz and Mermaid flowcharts](https://quarto.org/docs/authoring/diagrams.html).) Provide key results: the proteins selected for the classifier and the estimated accuracy.
 
 ## Findings
-
 
 ### Impact of preprocessing and outliers
 
@@ -46,10 +45,10 @@ When we apply a log transformation, we would reduce the impact of the extreme hi
 
 #### Question 2
 
-
 ### Methodlogical variations
 
-Task 3
+#### Question 3 
+Our code splits the data into training and test sets at the beginning with biomarker_split, and the feature selection is performed on biomarker_train. This setup ensures that the test set (biomarker_test) remains untouched until the final evaluation, so this requirement is already met in the code.
 
 ### Improved classifier
 
