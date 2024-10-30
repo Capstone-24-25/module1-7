@@ -56,13 +56,23 @@ Secondly, We increased the number of selected proteins which allows for a broade
 Thirdly, we used Weighted Combination of Ranks as the fuzzy intersection method, combining ranks from the t-tests and random forest based on significance and importance scores. The fuzzy intersection generally improves model generalization and robustness. By allowing flexibility, the model can retain proteins that may contribute meaningfully to predictions even if they’re not strictly top-ranked in both methods. This can enhance accuracy and ROC AUC without sacrificing sensitivity, as meaningful proteins from each selection method are retaineds.
 
 ```{r, echo=FALSE}
-
+library(tidyverse)
+library(infer)
+library(randomForest)
+library(tidymodels)
+library(modelr)
+library(yardstick)
+class_metrics <- metric_set(sensitivity, 
+                            specificity, 
+                            accuracy,
+                            roc_auc)
 testing(biomarker_split) %>%
   add_predictions(fit, type = 'response') %>%
   mutate(est = as.factor(pred > 0.5), tr_c = as.factor(class)) %>%
   class_metrics(estimate = est,
                 truth = tr_c, pred,
                 event_level = 'second')
+
 ```
 
 ### Improved classifier

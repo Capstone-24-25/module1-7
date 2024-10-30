@@ -57,6 +57,9 @@ biomarker_split <- biomarker_clean %>%
 biomarker_train <- training(biomarker_split)
 biomarket_test <- testing(biomarker_split)
 
+write_csv(biomarker_train, "/Users/amy/Desktop/pstat197A/module1-7/data/biomarker_train.csv")
+write_csv(biomarker_test, "/Users/amy/Desktop/pstat197A/module1-7/data/biomarker_test.csv")
+
 ## MULTIPLE TESTING
 ####################
 
