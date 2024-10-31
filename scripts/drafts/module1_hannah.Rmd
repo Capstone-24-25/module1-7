@@ -25,23 +25,85 @@ library(ggplot2)
 load("data\\biomarker-clean.RData")
 ```
 
-## -- Logistic Regression
+## -- LASSO Regression
 ```{r}
+set.seed(102024)
+
 biomarker <- biomarker_clean %>%
   select(-ados) %>%
   mutate(class = as.numeric(group == 'ASD'))
 
-# Splitting the data
-set.seed(102022)
-
-partitions <- biomarker %>%
+# Partitions 
+biomarker_split <- biomarker %>%
   initial_split(prop = 0.8)
 
-```
+bio_train <- training(biomarker_split)
+bio_test <- testing(biomarker_split)
 
-## -- LASSO Regression
-```{r}
+predictors <- training(biomarker_split) %>%
+  select(-c(group, class)) %>%
+  as.matrix()
 
+response <- training(biomarker_split) %>%
+  pull(class)
+
+# Selecting optimal lambda
+cv_out <- cv.glmnet(predictors, 
+                    response, 
+                    family = 'binomial',
+                    nfolds = 10, 
+                    alpha = 1)
+cv_out_df <- tidy(cv_out)
+
+best_lambda <- cv_out_df %>%
+  arrange(lambda) %>%
+  filter(nzero > 7) %>%
+  slice(1) %>%
+  pull(lambda)
+
+lasso_model <- glmnet(predictors, 
+                      response,
+                      family = 'binomial', 
+                      alpha = 1, 
+                      lambda = best_lambda)
+
+lasso_coefs <- coef(lasso_model)
+lasso_coefs_df <- as.data.frame(as.matrix(lasso_coefs)) %>%
+  filter(s0 != 0)
+
+lasso_proteins <- lasso_coefs_df %>%
+  mutate(proteins = rownames(lasso_coefs_df)) %>%
+  filter(rownames(lasso_coefs_df) != 'intercept') %>%
+  slice(-1) %>%
+  pull(proteins)
+
+# Testing accuracy and rebuilding training/testing sets
+new_model <- biomarker_clean %>% 
+  select(group, any_of(lasso_proteins)) %>% 
+  mutate(class = as.numeric(group == 'ASD')) %>% 
+  select(-group)
+
+set.seed(46400)
+partitions <- new_model %>%
+  initial_split(prop = 0.8)
+
+bio_train <- training(partitions)
+
+fit <- glm(class ~ ., 
+           data = bio_train, 
+           family = 'binomial')
+
+class_metric <- metric_set(accuracy)
+
+pred_df <- testing(partitions) %>% 
+  add_predictions(fit, type = 'response') %>% 
+  mutate(pred.class = (pred > 0.5),
+         group = factor(class, labels = c('TD', 'ASD')),
+         pred.group = factor(pred.class, labels = c('TD', 'ASD'))) 
+
+pred_df %>% class_metric(truth = group, estimate = pred.group, event_level = 'second')
+
+class_metric # accuracy of 0.8387
 ```
 
 ## -- Random Forest
