@@ -51,61 +51,86 @@ response <- training(biomarker_split) %>%
 cv_out <- cv.glmnet(predictors, 
                     response, 
                     family = 'binomial',
-                    nfolds = 10, 
-                    alpha = 1)
+                    nfolds = 5, 
+                    alpha = 1, 
+                    type.measure = 'deviance')
 cv_out_df <- tidy(cv_out)
+plot(cv_out)
 
-best_lambda <- cv_out_df %>%
-  arrange(lambda) %>%
-  filter(nzero > 7) %>%
-  slice(1) %>%
-  pull(lambda)
+#choosing lambda for final model
+lambda <- exp(-2.5)
+best_model <- glmnet(predictors,
+                     response,
+                     family = 'binomial', 
+                     lambda = lambda)
 
-lasso_model <- glmnet(predictors, 
-                      response,
-                      family = 'binomial', 
-                      alpha = 1, 
-                      lambda = best_lambda)
+best_model_df <- tidy(best_model)
 
-lasso_coefs <- coef(lasso_model)
-lasso_coefs_df <- as.data.frame(as.matrix(lasso_coefs)) %>%
-  filter(s0 != 0)
+#selecting proteins for panel
+protein_select <- best_model_df %>% 
+  filter(term != '(Intercept)') %>% 
+  pull(term)
+protein_select
 
-lasso_proteins <- lasso_coefs_df %>%
-  mutate(proteins = rownames(lasso_coefs_df)) %>%
-  filter(rownames(lasso_coefs_df) != 'intercept') %>%
-  slice_head(n = 10) %>%
-  pull(proteins)
+#rebuild training and testing with new panel
+bio_model <- biomarker_clean %>% 
+  select(group, any_of(protein_select)) %>% 
+  mutate(class = as.numeric(group == 'ASD')) %>% 
+  select(-group)
+
+set.seed(46400)
+bio_partitions <- bio_model %>% 
+  initial_split(prop = 0.8)
+
+bio_x_train <- training(bio_partitions)
+
+fit <- glm(class ~., data = bio_x_train,
+                 family = 'binomial')
+
+#Using yardstick package to find accuracy of model with the 5 protein panel
+class_metric <- metric_set(sensitivity, 
+                           specificity, 
+                           accuracy)
+
+pred_df <- testing(bio_partitions) %>% 
+  add_predictions(fit, type = 'response') %>% 
+  mutate(pred.class = (pred > 0.5),
+         group = factor(class, labels = c('TD', 'ASD')),
+         pred.group = factor(pred.class, labels = c('TD', 'ASD'))) 
+
+pred_df %>% class_metric(truth = group, estimate = pred.group, event_level = 'second')
 ```
 
 ## -- Logistic Regression
 ```{r}
-log_train <- training(biomarker_split) %>%
-  select(group, any_of(lasso_proteins)) %>%
+# Selecting subset
+proteins_sstar <- c("DERM", "RELT", "IgD", "PTN", "FSTL1")
+biomarker_sstar <- biomarker_clean %>%
+  select(group, any_of(proteins_sstar)) %>%
   mutate(class = (group == 'ASD')) %>%
   select(-group)
 
-log_test <- testing(biomarker_split) %>%
-  select(group, any_of(lasso_proteins)) %>%
-  mutate(class = (group == 'ASD')) %>%
-  select(-group)
+# Split into training and test data
+set.seed(101400)
+biomarker_partitions <- biomarker_sstar %>%
+  initial_split(prop = 0.8)
 
+# fit logistic regression model to training set
+fit <- glm(class ~ ., 
+           data = training(biomarker_partitions), 
+           family = 'binomial')
 
-log_fit <- glm(class ~ ., 
-               data = biomarker, 
-               family = 'binomial')
-class_metric <- metric_set(sensitivity, 
-                           specificity, 
-                           accuracy, 
-                           roc_auc)
+# evaluate errors on test set
+class_metrics <- metric_set(sensitivity, 
+                            specificity, 
+                            accuracy)
 
-log_test %>%
+testing(biomarker_partitions) %>%
   add_predictions(fit, type = 'response') %>%
   mutate(est = as.factor(pred > 0.5), tr_c = as.factor(class)) %>%
-  class_metric(estimate = est, 
-               truth = tr_c, pred, 
-               event_level = 'second')
-
+  class_metrics(estimate = est,
+              truth = tr_c, pred,
+              event_level = 'second')
 ```
 
 
