@@ -28,7 +28,7 @@ library(yardstick)
 
 ## Abstract
 
-Do at the end
+Hewitson et al. (2021) conducted a study analyzing 1,317 proteins in typically developing boys (TD) and boys diagnosed with Autism Spectrum Disorder (ASD). Their goal was to identify a panel of proteins that could predict ASD status based on biomarker data. In our project, we aimed to replicate and expand on their methodology to gain insights into both the dataset and the predictive potential of individual proteins.
 
 ## Dataset
 
