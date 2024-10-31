@@ -34,21 +34,21 @@ Do at the end
 
 The data set shows serum samples from 76 boys with ASD and 78 typically developing boys from 18 months - 8 years of age. We will be looking at a total of 1,317 proteins that were analyzed from each sample (192 of these failed quality control, but since we don't know which ones we used them all). The observations in the data set tell us the serum level of a specific protein of a specific boy.
 
-## Summary of published analysis
+## Summary of Published Analysis
 
 Summarize the methodology of the paper in 1-3 paragraphs. You need not explain the methods in depth as we did in class; just indicate what methods were used and how they were combined. If possible, include a diagram that depicts the methodological design. (Quarto has support for [GraphViz and Mermaid flowcharts](https://quarto.org/docs/authoring/diagrams.html).) Provide key results: the proteins selected for the classifier and the estimated accuracy.
 
 ## Findings
 
-### Impact of preprocessing and outliers
+### Impact of Pre-processing and Outliers
 
-#### Question 1
+#### Task 1
 
 The purpose of Log-transforming protein values in a data set is done to address the distribution of the raw values. The data follows a right-skewed (positively skewed) distribution, meaning there are many small values and a few very large values. This skew can make it difficult to analyze patterns and correlations, as the larger values can overly influence results.
 
 When we apply a log transformation, we would reduce the impact of the extreme high values, therefore making the distribution more symmetric and closer to a normal distribution. This action would bring outliers closer to the main body data, which would stabilize variance and improve the performance of models. Additionally, it could make the relationships between the variables more linear, which would ensure that in analyses the results will not be overly influenced by extreme values.
 
-#### Question 2
+#### Task 2
 
 ```{r}
 ## Preprocessing function but without trimming:
@@ -130,7 +130,9 @@ outliers_ge_4
 
 We can see that 4 groups above, groups: Sig14, TLR2, TGM3 and GM-CSF all have 4-5 outliers. Neat!
 
-#### Question 3
+### Methodological Variations
+
+#### Task 3
 
 Our code splits the data into training and test sets at the beginning with biomarker_split, and the feature selection is performed on biomarker_train. This setup ensures that the test set (biomarker_test) remains untouched until the final evaluation, so this requirement is already met in the code.
 
@@ -154,6 +156,95 @@ testing(biomarker_split) %>%
 
 ```
 
-### Improved classifier
+### Improved Classifier
 
-Task 4
+#### Task 4
+
+We will now attempt to find an alternative panel that has higher classification accuracy than the benchmark panel.
+
+The method of choice was using LASSO regression. We begin by partitioning the data to create a training and testing set and filtering participants who have ASD.
+
+```{r}
+set.seed(102024)
+
+biomarker <- biomarker_clean %>%
+  select(-ados) %>%
+  mutate(class = as.numeric(group == 'ASD'))
+
+# Partitions 
+biomarker_split <- biomarker %>%
+  initial_split(prop = 0.8)
+
+bio_train <- training(biomarker_split)
+bio_test <- testing(biomarker_split)
+
+predictors <- training(biomarker_split) %>%
+  select(-c(group, class)) %>%
+  as.matrix()
+
+response <- training(biomarker_split) %>%
+  pull(class)
+```
+
+Next, we fitted the data to a LASSO model, which used deviance as a measure, as minimizing the deviance can be understood as maximizing the likelihood of the model.
+
+```{r}
+# Selecting optimal lambda
+cv_out <- cv.glmnet(predictors, 
+                    response, 
+                    family = 'binomial',
+                    alpha = 1, 
+                    type.measure = 'deviance')
+cv_out_df <- tidy(cv_out)
+plot(cv_out)
+
+```
+
+The range of values for the optimal value of log lambda falls roughly between -2.8 and -3.4. Through trial and error, we found that the lambda that improved accuracy the most was e\^(-2.7).
+
+```{r}
+# Choosing lambda for final model
+lambda <- exp(-2.7)
+best_model <- glmnet(predictors,
+                     response,
+                     family = 'binomial', 
+                     lambda = lambda)
+
+best_model_df <- tidy(best_model)
+
+# Selecting proteins for panel
+protein_select <- best_model_df %>% 
+  filter(term != '(Intercept)') %>% 
+  pull(term)
+protein_select
+
+# Rebuild training and testing with new panel
+bio_model <- biomarker_clean %>% 
+  select(group, any_of(protein_select)) %>% 
+  mutate(class = as.numeric(group == 'ASD')) %>% 
+  select(-group)
+
+set.seed(46400)
+bio_partitions <- bio_model %>% 
+  initial_split(prop = 0.8)
+
+bio_x_train <- training(bio_partitions)
+
+fit <- glm(class ~., data = bio_x_train,
+                 family = 'binomial')
+
+# Using yardstick package to find accuracy of model with the 5 protein panel
+class_metric <- metric_set(sensitivity, 
+                           specificity, 
+                           accuracy)
+
+pred_df <- testing(bio_partitions) %>% 
+  add_predictions(fit, type = 'response') %>% 
+  mutate(pred.class = (pred > 0.5),
+         group = factor(class, labels = c('TD', 'ASD')),
+         pred.group = factor(pred.class, labels = c('TD', 'ASD'))) 
+
+pred_df %>% class_metric(truth = group, estimate = pred.group, event_level = 'second')
+```
+
+The result was a panel of 23 proteins. The accuracy of this model was 0.903, which improved from the benchmark panel's accuracy of 0.774. Thus, we successfully found an alternative panel with improved classification accuracy.
