@@ -1,7 +1,7 @@
 ---
 title: "Biomarkers of ASD"
-subtitle: "If you want a subtitle put it here"
-author: "List names here"
+subtitle: "Group 7"
+author: "Amy Ji, Bennett Bishop, Casey Linden, Hannah Kim"
 date: last-modified
 published-title: "Updated"
 editor: visual
@@ -14,37 +14,408 @@ execute:
   cache: true
 ---
 
-Use this as a template. Keep the headers and remove all other text. In all, your report can be quite short. When it is complete, render and then push changes to your team repository.
-
 ```{r}
 # load any other packages and read data here
 library(tidyverse)
+library(infer)
+library(randomForest)
+library(tidymodels)
+library(modelr)
+library(yardstick)
 ```
 
 ## Abstract
 
-Write a brief one-paragraph abstract that describes the contents of your write-up.
+Hewitson et al. (2021) conducted a study analyzing 1,317 proteins in typically developing boys (TD) and boys diagnosed with Autism Spectrum Disorder (ASD). Their goal was to identify a panel of proteins that could predict ASD status based on biomarker data. In our project, we aimed to replicate and expand on their methodology to gain insights into both the dataset and the predictive potential of individual proteins. 
 
 ## Dataset
 
-Write a brief data description, including: how data were obtained; sample characteristics; variables measured; and data preprocessing. This can be largely based on the source paper and should not exceed 1-2 paragraphs.
+The data set shows serum samples from 76 boys with ASD and 78 typically developing boys from 18 months - 8 years of age. We will be looking at a total of 1,317 proteins that were analyzed from each sample (192 of these failed quality control, but since we don't know which ones we used them all). The observations in the data set tell us the serum level of a specific protein of a specific boy.
 
-## Summary of published analysis
+## Summary of Published Analysis
 
-Summarize the methodology of the paper in 1-3 paragraphs. You need not explain the methods in depth as we did in class; just indicate what methods were used and how they were combined. If possible, include a diagram that depicts the methodological design. (Quarto has support for [GraphViz and Mermaid flowcharts](https://quarto.org/docs/authoring/diagrams.html).) Provide key results: the proteins selected for the classifier and the estimated accuracy.
+This study used 3 different methods to evaluate the significance of each protein in the detection of ASD: multiple testing, correlation with severity, and random forests. Multiple testing involved selecting all proteins for which the t-test indicated a significant difference between their mean levels in the ASD group and TD group. The top 10 proteins with the highest level of significance were returned. Correlation with severity involved finding the proteins with the strongest correlations with ADOS. The random forest method involved constructing decision trees with recursive partitioning and finding which predictors had the most influence in a random forest. In this case, finding the most significant proteins involved predicting how important the protein was in predicting ASD.
+
+Once the top 10 proteins were found using each method, the 'core' proteins were those that were in the top 10 in all three methods. The study found 5 'core' proteins: MAPK14, IgD, DERM, EPHB2, and suPAR. An additional 4 proteins (ROR1, GI24, elF-4H, and ARSB) were found to be significant through logistic regression. By adding the 4 proteins to the total 9 'optimal proteins', the panel had an AUC score of 0.860, a sensitivity of 0.833, and a specificity of 0.846.
 
 ## Findings
 
-Summarize your findings here. I've included some subheaders in a way that seems natural to me; you can structure this section however you like.
+### Impact of Pre-processing and Outliers
 
-### Impact of preprocessing and outliers
+#### Task 1
 
-Tasks 1-2
+The purpose of Log-transforming protein values in a data set is done to address the distribution of the raw values. The data follows a right-skewed (positively skewed) distribution, meaning there are many small values and a few very large values. This skew can make it difficult to analyze patterns and correlations, as the larger values can overly influence results.
 
-### Methodlogical variations
+When we apply a log transformation, we would reduce the impact of the extreme high values, therefore making the distribution more symmetric and closer to a normal distribution. This action would bring outliers closer to the main body data, which would stabilize variance and improve the performance of models. Additionally, it could make the relationships between the variables more linear, which would ensure that in analyses the results will not be overly influenced by extreme values.
 
-Task 3
+#### Task 2
 
-### Improved classifier
+```{r}
+## Preprocessing function but without trimming:
 
-Task 4
+# get names
+var_names <- read_csv('../../data/biomarker-raw.csv', 
+                     col_names = F, 
+                     n_max = 2, 
+                     col_select = -(1:2)) %>%
+  t() %>%
+  as_tibble() %>%
+  rename(name = V1, 
+         abbreviation = V2) %>%
+  na.omit()
+
+# function for trimming outliers (good idea??)
+# trim <- function(x, .at){
+# x[abs(x) > .at] <- sign(x[abs(x) > .at])*.at
+#  return(x)
+#}
+
+# read in data
+biomarker_clean <- read_csv('../../data/biomarker-raw.csv', 
+         skip = 2,
+         col_select = -2L,
+         col_names = c('group', 
+                       'empty',
+                       pull(var_names, abbreviation),
+                       'ados'),
+         na = c('-', '')) %>%
+  filter(!is.na(group)) %>%
+  # log transform, center and scale, and trim
+  mutate(across(.cols = -c(group, ados),
+                ~ (scale(log10(.x))[, 1]))) %>%
+  # reorder columns
+  select(group, ados, everything())
+
+# calculate Z-scores for each column
+z_score <- biomarker_clean %>%
+  group_by(group) %>%
+  mutate(across(where(is.numeric), ~ ((. - mean(., na.rm = TRUE)) / sd(., na.rm = TRUE)))) %>%
+  ungroup()
+
+# count outliers using `if_else()` and summarise per group
+outlier_counts <- z_score %>%
+  mutate(across(where(is.numeric), ~ if_else(abs(.) > 3, 1, 0))) %>%
+  group_by(group) %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE))
+
+# Display the outlier counts by group and variable
+print(outlier_counts)
+```
+
+From simply looking over each subject above, it looks like most have 0-3 outliers. Lets see the total number of outliers in each group:
+
+```{r}
+total_outliers_by_group <- outlier_counts %>%
+  rowwise() %>%
+  mutate(Total_Outliers = sum(c_across(where(is.numeric)), na.rm = TRUE)) %>%
+  select(group, Total_Outliers)
+
+total_outliers_by_group
+```
+
+It looks like ASD has 1062 total outliers, while TD has a total of 1341 outliers.
+
+Now, we can check out the subjects with large numbers of outliers. The following graph shows subjects with 4+ outliers.
+
+```{r}
+# Identify subjects with 4 or more outliers
+outliers_ge_4 <- outlier_counts %>%
+  pivot_longer(cols = -group, names_to = "Column", values_to = "Outlier_Count") %>%
+  filter(Outlier_Count >= 4) %>%
+  arrange(group, desc(Outlier_Count))
+
+# Display the result
+outliers_ge_4
+```
+
+We can see that 4 groups above, groups: Sig14, TLR2, TGM3 and GM-CSF all have 4-5 outliers. Neat!
+
+### Methodological Variations
+
+#### Task 3
+
+Our code splits the data into training and test sets at the beginning with biomarker_split, and the feature selection is performed on biomarker_train. This setup ensures that the test set (biomarker_test) remains untouched until the final evaluation, so this requirement is already met in the code.
+
+By performing feature selection only on the training set, we avoid information leakage into the test set, leading to a more unbiased estimate of the model's performance. This approach ensures that the test set is purely "unseen" data, providing a more reliable measure of how the model will perform in real-world scenarios.
+
+Secondly, we increased the number of selected proteins which allows for a broader range of potentially relevant features, which might capture more nuanced relationships between proteins and the outcome (ASD vs. TD). However, selecting more proteins may also introduce some noise if the added proteins are less predictive.
+
+Thirdly, we used Weighted Combination of Ranks as the fuzzy intersection method, combining ranks from the t-tests and random forest based on significance and importance scores. The fuzzy intersection generally improves model generalization and robustness. By allowing flexibility, the model can retain proteins that may contribute meaningfully to predictions even if they’re not strictly top-ranked in both methods. This can enhance accuracy and ROC AUC without sacrificing sensitivity, as meaningful proteins from each selection method are retained.
+
+```{r, echo=FALSE}
+```{r}
+getwd()
+setwd("/Users/amy/Desktop/pstat197A/module1-7")
+
+library(tidyverse)
+# get names
+var_names <- read_csv("/Users/amy/Desktop/pstat197A/module1-7/data/biomarker-raw.csv", 
+                     col_names = F, 
+                     n_max = 2, 
+                     col_select = -(1:2)) %>%
+  t() %>%
+  as_tibble() %>%
+  rename(name = V1, 
+         abbreviation = V2) %>%
+  na.omit()
+# function for trimming outliers (good idea??)
+trim <- function(x, .at){
+  x[abs(x) > .at] <- sign(x[abs(x) > .at])*.at
+  return(x)
+}
+
+# read in data
+biomarker_clean <- read_csv('data/biomarker-raw.csv', 
+         skip = 2,
+         col_select = -2L,
+         col_names = c('group', 
+                       'empty',
+                       pull(var_names, abbreviation),
+                       'ados'),
+         na = c('-', '')) %>%
+  filter(!is.na(group)) %>%
+  # log transform, center and scale, and trim
+  mutate(across(.cols = -c(group, ados), 
+                ~ trim(scale(log10(.x))[, 1], .at = 3))) %>%
+  # reorder columns
+  select(group, ados, everything())
+
+# export as r binary
+save(list = 'biomarker_clean', 
+     file = 'data/biomarker-clean.RData')
+```
+
+```{r}
+
+library(tidyverse)
+library(infer)
+library(randomForest)
+library(tidymodels)
+library(modelr)
+library(yardstick)
+
+
+# partition data
+biomarker_split <- biomarker_clean %>%
+  initial_split(prop = 0.8)
+
+biomarker_train <- training(biomarker_split)
+biomarker_test <- testing(biomarker_split)
+
+write_csv(biomarker_train, "/Users/amy/Desktop/pstat197A/module1-7/data/biomarker_train.csv")
+write_csv(biomarker_test, "/Users/amy/Desktop/pstat197A/module1-7/data/biomarker_test.csv")
+
+
+## MULTIPLE TESTING
+####################
+
+# function to compute tests
+test_fn <- function(.df){
+  t_test(.df, 
+         formula = level ~ group,
+         order = c('ASD', 'TD'),
+         alternative = 'two-sided',
+         var.equal = F)
+}
+
+ttests_out <- biomarker_train %>%
+  # drop ADOS score
+  select(-ados) %>%
+  # arrange in long format
+  pivot_longer(-group, 
+               names_to = 'protein', 
+               values_to = 'level') %>%
+  # nest by protein
+  nest(data = c(level, group)) %>% 
+  # compute t tests
+  mutate(ttest = map(data, test_fn)) %>%
+  unnest(ttest) %>%
+  # sort by p-value
+  arrange(p_value) %>%
+  # multiple testing correction
+  mutate(m = n(),
+         hm = log(m) + 1/(2*m) - digamma(1),
+         rank = row_number(),
+         p.adj = m*hm*p_value/rank)
+
+# select significant proteins
+proteins_s1 <- ttests_out %>%
+  slice_min(p.adj, n = 20) %>%
+  pull(protein)
+
+## RANDOM FOREST
+##################
+
+# store predictors and response separately
+predictors <- biomarker_train %>%
+  select(-c(group, ados))
+
+response <- biomarker_train %>% pull(group) %>% factor()
+
+# fit RF
+set.seed(101422)
+rf_out <- randomForest(x = predictors, 
+                       y = response, 
+                       ntree = 1000, 
+                       importance = T)
+
+# check errors
+rf_out$confusion
+
+# compute importance scores
+proteins_s2 <- rf_out$importance %>% 
+  as_tibble() %>%
+  mutate(protein = rownames(rf_out$importance)) %>%
+  slice_max(MeanDecreaseGini, n = 20) %>%
+  pull(protein)
+
+
+## LOGISTIC REGRESSION
+
+# Weighted Combination of Ranks (Fuzzy Intersection)
+
+# Rank proteins by significance in each method
+ttests_ranked <- ttests_out %>%
+  mutate(ttest_rank = rank(p.adj)) %>%
+  select(protein, ttest_rank)
+
+rf_ranked <- rf_out$importance %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "protein") %>%
+  as_tibble() %>%
+  mutate(rf_rank = rank(-MeanDecreaseGini)) %>%
+  select(protein, rf_rank)
+
+# Combine ranks and calculate combined score
+combined_ranks <- ttests_ranked %>%
+  inner_join(rf_ranked, by = "protein") %>%
+  mutate(combined_score = ttest_rank + rf_rank) %>%
+  arrange(combined_score)
+
+# Select top proteins based on combined score
+proteins_sstar <- combined_ranks %>%
+  slice_min(combined_score, n = 20) %>%
+  pull(protein)
+
+biomarker_sstar <- biomarker_clean %>%
+  select(group, any_of(proteins_sstar)) %>%
+  mutate(class = (group == 'ASD')) %>%
+  select(-group)
+
+# partition into training and test set
+set.seed(101422)
+biomarker_split <- biomarker_sstar %>%
+  initial_split(prop = 0.8)
+
+# fit logistic regression model to training set
+fit <- glm(class ~ ., 
+           data = training(biomarker_split), 
+           family = 'binomial')
+
+# evaluate errors on test set
+class_metrics <- metric_set(sensitivity, 
+                            specificity, 
+                            accuracy,
+                            roc_auc)
+
+testing(biomarker_split) %>%
+  add_predictions(fit, type = 'response') %>%
+  mutate(est = as.factor(pred > 0.5), tr_c = as.factor(class)) %>%
+  class_metrics(estimate = est,
+              truth = tr_c, pred,
+              event_level = 'second')
+
+```
+
+### Improved Classifier
+
+#### Task 4
+
+We will now attempt to find an alternative panel that has higher classification accuracy than the benchmark panel.
+
+The method of choice was using LASSO regression. We begin by partitioning the data to create a training and testing set and filtering participants who have ASD.
+
+```{r}
+set.seed(102024)
+
+biomarker <- biomarker_clean %>%
+  select(-ados) %>%
+  mutate(class = as.numeric(group == 'ASD'))
+
+# Partitions 
+biomarker_split <- biomarker %>%
+  initial_split(prop = 0.8)
+
+bio_train <- training(biomarker_split)
+bio_test <- testing(biomarker_split)
+
+predictors <- training(biomarker_split) %>%
+  select(-c(group, class)) %>%
+  as.matrix()
+
+response <- training(biomarker_split) %>%
+  pull(class)
+```
+
+Next, we fitted the data to a LASSO model, which used deviance as a measure, as minimizing the deviance can be understood as maximizing the likelihood of the model.
+
+```{r}
+# Selecting optimal lambda
+cv_out <- cv.glmnet(predictors, 
+                    response, 
+                    family = 'binomial',
+                    alpha = 1, 
+                    type.measure = 'deviance')
+cv_out_df <- tidy(cv_out)
+plot(cv_out)
+
+```
+
+The range of values for the optimal value of log lambda falls roughly between -2.8 and -3.4. Through trial and error, we found that the lambda that improved accuracy the most was e\^(-2.7).
+
+```{r}
+# Choosing lambda for final model
+lambda <- exp(-2.7)
+best_model <- glmnet(predictors,
+                     response,
+                     family = 'binomial', 
+                     lambda = lambda)
+
+best_model_df <- tidy(best_model)
+
+# Selecting proteins for panel
+protein_select <- best_model_df %>% 
+  filter(term != '(Intercept)') %>% 
+  pull(term)
+protein_select
+
+# Rebuild training and testing with new panel
+bio_model <- biomarker_clean %>% 
+  select(group, any_of(protein_select)) %>% 
+  mutate(class = as.numeric(group == 'ASD')) %>% 
+  select(-group)
+
+set.seed(46400)
+bio_partitions <- bio_model %>% 
+  initial_split(prop = 0.8)
+
+bio_x_train <- training(bio_partitions)
+
+fit <- glm(class ~., data = bio_x_train,
+                 family = 'binomial')
+
+# Using yardstick package to find accuracy of model with the 5 protein panel
+class_metric <- metric_set(sensitivity, 
+                           specificity, 
+                           accuracy)
+
+pred_df <- testing(bio_partitions) %>% 
+  add_predictions(fit, type = 'response') %>% 
+  mutate(pred.class = (pred > 0.5),
+         group = factor(class, labels = c('TD', 'ASD')),
+         pred.group = factor(pred.class, labels = c('TD', 'ASD'))) 
+
+pred_df %>% class_metric(truth = group, estimate = pred.group, event_level = 'second')
+```
+
+The result was a panel of 23 proteins. The accuracy of this model was 0.903, which improved from the benchmark panel's accuracy of 0.774. Thus, we successfully found an alternative panel with improved classification accuracy.
