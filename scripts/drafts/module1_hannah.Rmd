@@ -74,40 +74,37 @@ lasso_coefs_df <- as.data.frame(as.matrix(lasso_coefs)) %>%
 lasso_proteins <- lasso_coefs_df %>%
   mutate(proteins = rownames(lasso_coefs_df)) %>%
   filter(rownames(lasso_coefs_df) != 'intercept') %>%
-  slice(-1) %>%
+  slice_head(n = 10) %>%
   pull(proteins)
-
-# Testing accuracy and rebuilding training/testing sets
-new_model <- biomarker_clean %>% 
-  select(group, any_of(lasso_proteins)) %>% 
-  mutate(class = as.numeric(group == 'ASD')) %>% 
-  select(-group)
-
-set.seed(46400)
-partitions <- new_model %>%
-  initial_split(prop = 0.8)
-
-bio_train <- training(partitions)
-
-fit <- glm(class ~ ., 
-           data = bio_train, 
-           family = 'binomial')
-
-class_metric <- metric_set(accuracy)
-
-pred_df <- testing(partitions) %>% 
-  add_predictions(fit, type = 'response') %>% 
-  mutate(pred.class = (pred > 0.5),
-         group = factor(class, labels = c('TD', 'ASD')),
-         pred.group = factor(pred.class, labels = c('TD', 'ASD'))) 
-
-pred_df %>% class_metric(truth = group, estimate = pred.group, event_level = 'second')
-
-class_metric # accuracy of 0.8387
 ```
 
-## -- Random Forest
+## -- Logistic Regression
 ```{r}
+log_train <- training(biomarker_split) %>%
+  select(group, any_of(lasso_proteins)) %>%
+  mutate(class = (group == 'ASD')) %>%
+  select(-group)
+
+log_test <- testing(biomarker_split) %>%
+  select(group, any_of(lasso_proteins)) %>%
+  mutate(class = (group == 'ASD')) %>%
+  select(-group)
+
+
+log_fit <- glm(class ~ ., 
+               data = biomarker, 
+               family = 'binomial')
+class_metric <- metric_set(sensitivity, 
+                           specificity, 
+                           accuracy, 
+                           roc_auc)
+
+log_test %>%
+  add_predictions(fit, type = 'response') %>%
+  mutate(est = as.factor(pred > 0.5), tr_c = as.factor(class)) %>%
+  class_metric(estimate = est, 
+               truth = tr_c, pred, 
+               event_level = 'second')
 
 ```
 
